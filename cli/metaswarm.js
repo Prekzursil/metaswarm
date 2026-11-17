@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 
 const PKG_ROOT = path.resolve(__dirname, '..');
 const CWD = process.cwd();
@@ -29,6 +29,21 @@ function skip(msg) {
 
 function mkdirp(dir) {
   fs.mkdirSync(dir, { recursive: true });
+}
+
+// Race-free "copy only if absent": open with 'wx' so a concurrent writer can
+// never be clobbered (fixes TOCTOU between existsSync and copyFileSync).
+function copyIfAbsent(src, dest) {
+  const content = fs.readFileSync(src, 'utf-8');
+  try {
+    const fd = fs.openSync(dest, 'wx');
+    fs.writeFileSync(fd, content);
+    fs.closeSync(fd);
+    return true;
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    throw e;
+  }
 }
 
 const METASWARM_MARKER = '## metaswarm';
@@ -60,7 +75,7 @@ function installCodex() {
   if (fs.existsSync(installDir)) {
     console.log(`  Updating existing installation at ${installDir}...`);
     try {
-      execSync('git pull --rebase origin main', { cwd: installDir, stdio: 'inherit' });
+      execFileSync('git', ['pull', '--rebase', 'origin', 'main'], { cwd: installDir, stdio: 'inherit' });
       info('Updated metaswarm');
     } catch (e) {
       warn(`git pull failed: ${e.message || e}`);
@@ -70,7 +85,7 @@ function installCodex() {
     console.log(`  Cloning metaswarm to ${installDir}...`);
     mkdirp(path.dirname(installDir));
     try {
-      execSync(`git clone https://github.com/dsifry/metaswarm.git "${installDir}"`, { stdio: 'inherit' });
+      execFileSync('git', ['clone', 'https://github.com/dsifry/metaswarm.git', installDir], { stdio: 'inherit' });
       info('Cloned metaswarm');
     } catch (e) {
       warn(`Clone failed: ${e.message}`);
@@ -157,8 +172,11 @@ function setupProject(platformFlag) {
 
     if (!fs.existsSync(instrPath)) {
       if (fs.existsSync(fullTemplate)) {
-        fs.copyFileSync(fullTemplate, instrPath);
-        info(`${instrFile} (written from template)`);
+        if (copyIfAbsent(fullTemplate, instrPath)) {
+          info(`${instrFile} (written from template)`);
+        } else {
+          skip(`${instrFile}`);
+        }
       } else {
         warn(`${instrFile} template not found`);
       }
@@ -176,11 +194,12 @@ function setupProject(platformFlag) {
   // Coverage thresholds
   const coveragePath = path.join(CWD, '.coverage-thresholds.json');
   const coverageTemplate = path.join(PKG_ROOT, 'templates', 'coverage-thresholds.json');
-  if (!fs.existsSync(coveragePath) && fs.existsSync(coverageTemplate)) {
-    fs.copyFileSync(coverageTemplate, coveragePath);
-    info('.coverage-thresholds.json');
-  } else if (fs.existsSync(coveragePath)) {
-    skip('.coverage-thresholds.json');
+  if (fs.existsSync(coverageTemplate)) {
+    if (copyIfAbsent(coverageTemplate, coveragePath)) {
+      info('.coverage-thresholds.json');
+    } else {
+      skip('.coverage-thresholds.json');
+    }
   }
 
   console.log('\n  Project setup complete!');

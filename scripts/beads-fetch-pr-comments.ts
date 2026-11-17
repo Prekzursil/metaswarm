@@ -13,7 +13,7 @@
 
 import { parseArgs } from "util";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
-import { dirname } from "path";
+import { dirname, resolve, sep } from "path";
 
 // =============================================================================
 // CLI Arguments
@@ -93,7 +93,22 @@ const KNOWN_REVIEWERS = {
 } as const;
 
 const DAYS = parseInt(args.days || "7", 10);
-const OUTPUT_PATH = args.output || ".beads/temp/pr-comments.json";
+
+/**
+ * The fetched PR data is written to a cache file on disk. Constrain the
+ * output location to the current working directory so untrusted input can
+ * never redirect the cache over arbitrary files (http-to-file-access).
+ */
+function safeOutputPath(raw: string): string {
+  const resolved = resolve(raw);
+  const root = process.cwd();
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new Error(`Output path must stay inside the working directory: ${raw}`);
+  }
+  return resolved;
+}
+
+const OUTPUT_PATH = safeOutputPath(args.output || ".beads/temp/pr-comments.json");
 
 // =============================================================================
 // GitHub API

@@ -16,8 +16,8 @@
  */
 
 import { parseArgs } from "util";
-import { writeFileSync, readFileSync, readdirSync, existsSync, mkdirSync } from "fs";
-import { dirname, join, basename } from "path";
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { dirname, join } from "path";
 import { homedir } from "os";
 
 // =============================================================================
@@ -203,7 +203,6 @@ function extractTextContent(content: unknown): string {
 function detectTriggerType(
   text: string
 ): { type: LearningTrigger["type"]; confidence: "high" | "medium" | "low" } | null {
-  const lowerText = text.toLowerCase();
 
   // Check for corrections (high value)
   for (const pattern of CORRECTION_PATTERNS) {
