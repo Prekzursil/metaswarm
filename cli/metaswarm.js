@@ -170,7 +170,17 @@ function setupProject(platformFlag) {
     const fullTemplate = path.join(templateDir, instrFile);
     const appendTemplate = path.join(templateDir, `${path.basename(instrFile, '.md')}-append.md`);
 
-    if (!fs.existsSync(instrPath)) {
+    // Guard by ATTEMPTING the read (not existsSync): a separate existence
+    // check can be invalidated between check and use (TOCTOU race). ENOENT
+    // is the only "absent" signal we act on; anything else is a real error.
+    let existing = null;
+    try {
+      existing = fs.readFileSync(instrPath, 'utf-8');
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+
+    if (existing === null) {
       if (fs.existsSync(fullTemplate)) {
         if (copyIfAbsent(fullTemplate, instrPath)) {
           info(`${instrFile} (written from template)`);
@@ -180,14 +190,11 @@ function setupProject(platformFlag) {
       } else {
         warn(`${instrFile} template not found`);
       }
-    } else {
-      const existing = fs.readFileSync(instrPath, 'utf-8');
-      if (existing.includes(METASWARM_MARKER) || existing.includes('metaswarm')) {
-        skip(`${instrFile} (metaswarm reference already present)`);
-      } else if (fs.existsSync(appendTemplate)) {
-        fs.appendFileSync(instrPath, '\n' + fs.readFileSync(appendTemplate, 'utf-8'));
-        info(`${instrFile} (appended metaswarm section)`);
-      }
+    } else if (existing.includes(METASWARM_MARKER) || existing.includes('metaswarm')) {
+      skip(`${instrFile} (metaswarm reference already present)`);
+    } else if (fs.existsSync(appendTemplate)) {
+      fs.appendFileSync(instrPath, '\n' + fs.readFileSync(appendTemplate, 'utf-8'));
+      info(`${instrFile} (appended metaswarm section)`);
     }
   }
 
