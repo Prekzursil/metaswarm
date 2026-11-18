@@ -62,6 +62,60 @@ interface PrComment {
   createdAt: string;
 }
 
+// =============================================================================
+// Untrusted-data sanitization (js/http-to-file-access)
+// =============================================================================
+
+/**
+ * Everything written into the cache file originates from untrusted GitHub
+ * API responses. Validate and bound each field before it reaches the
+ * file-system write, so the cache can only ever contain plain, size-limited
+ * JSON scalars — never raw passthrough of remote payload structure.
+ */
+const MAX_BODY_LENGTH = 200_000;
+const MAX_FIELD_LENGTH = 1_000;
+
+function asBoundedString(value: unknown, max: number): string {
+  if (typeof value !== "string") return "";
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+function asBoundedNumber(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function asIsoTimestamp(value: unknown): string {
+  const s = asBoundedString(value, 64);
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(s) ? s : "";
+}
+
+type ReviewerType = PrComment["reviewerType"];
+
+function sanitizeComment(
+  prNumber: unknown,
+  prTitle: unknown,
+  reviewer: string,
+  reviewerType: ReviewerType,
+  body: unknown,
+  filePath: unknown,
+  url: unknown,
+  createdAt: unknown
+): PrComment {
+  const comment: PrComment = {
+    prNumber: asBoundedNumber(prNumber),
+    prTitle: asBoundedString(prTitle, MAX_FIELD_LENGTH),
+    reviewer,
+    reviewerType,
+    body: asBoundedString(body, MAX_BODY_LENGTH),
+    url: asBoundedString(url, MAX_FIELD_LENGTH),
+    createdAt: asIsoTimestamp(createdAt),
+  };
+  const cleanPath = asBoundedString(filePath, MAX_FIELD_LENGTH);
+  if (cleanPath) comment.filePath = cleanPath;
+  return comment;
+}
+
 interface OutputData {
   fetchedAt: string;
   period: {
@@ -283,16 +337,16 @@ async function main() {
       if (reviewerType === "unknown") continue;
 
       byReviewerType[reviewerType] = (byReviewerType[reviewerType] || 0) + 1;
-      allComments.push({
+      allComments.push(sanitizeComment(
         prNumber,
-        prTitle: pr.title,
-        reviewer: c.user?.login || "unknown",
+        pr.title,
+        c.user?.login || "unknown",
         reviewerType,
-        body: c.body,
-        filePath: c.path,
-        url: c.html_url,
-        createdAt: c.created_at,
-      });
+        c.body,
+        c.path,
+        c.html_url,
+        c.created_at
+      ));
       count++;
     }
 
@@ -302,15 +356,16 @@ async function main() {
       if (reviewerType === "unknown") continue;
 
       byReviewerType[reviewerType] = (byReviewerType[reviewerType] || 0) + 1;
-      allComments.push({
+      allComments.push(sanitizeComment(
         prNumber,
-        prTitle: pr.title,
-        reviewer: c.user?.login || "unknown",
+        pr.title,
+        c.user?.login || "unknown",
         reviewerType,
-        body: c.body,
-        url: c.html_url,
-        createdAt: c.created_at,
-      });
+        c.body,
+        undefined,
+        c.html_url,
+        c.created_at
+      ));
       count++;
     }
 
